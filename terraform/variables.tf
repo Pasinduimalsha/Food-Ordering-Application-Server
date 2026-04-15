@@ -13,5 +13,5 @@ variable "ami"{
 variable "key_name" {
     description = "Name of the AWS key pair to use for EC2 instances"
     type        = string
-    default     = "sandatharu"
+    default     = "Jenkins"
 }
