@@ -1,15 +1,9 @@
 resource "aws_security_group" "build_server_sg" {
   name        = "build_server_sg"
-  description = "Food Ordering Application Security Group"
+  description = "Food Ordering Application Build Server Security Group"
   vpc_id      = data.aws_vpc.default.id
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
+  # SSH for Jenkins access
   ingress {
     from_port   = 22
     to_port     = 22
@@ -25,7 +19,7 @@ resource "aws_security_group" "build_server_sg" {
   }
 
   tags = {
-    Name = "Build Server"
+    Name = "Build Server SG"
   }
 }
 
@@ -45,13 +39,15 @@ resource "aws_security_group" "deploy_server_sg" {
   description = "Deployment Server Security Group"
   vpc_id      = data.aws_vpc.default.id
 
+  # Application Port
   ingress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = 8081
+    to_port     = 8081
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # SSH for Jenkins access
   ingress {
     from_port   = 22
     to_port     = 22
@@ -67,7 +63,7 @@ resource "aws_security_group" "deploy_server_sg" {
   }
 
   tags = {
-    Name = "Deploy Server"
+    Name = "Deploy Server SG"
   }
 }
 

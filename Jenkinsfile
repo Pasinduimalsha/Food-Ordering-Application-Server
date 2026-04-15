@@ -1,137 +1,174 @@
 pipeline {
-    agent none
+    agent any
+    options {
+        // Aggressive build rotation: Keep ONLY last 2 builds given disk space constraints
+        buildDiscarder(logRotator(numToKeepStr: '2', artifactNumToKeepStr: '2'))
+        timeout(time: 1, unit: 'HOURS')
+    }
     parameters {
         booleanParam(name: 'autoApprove', defaultValue: false, description: 'Automatically run apply after generating plan?')
+        booleanParam(name: 'runSonar', defaultValue: false, description: 'Run SonarQube code analysis?')
     }
     environment {
         AWS_ACCESS_KEY_ID = credentials('AWS_ACCESS_KEY_ID')
         AWS_SECRET_ACCESS_KEY = credentials('AWS_SECRET_ACCESS_KEY')
-        LOCAL_BIN_PATH = "/usr/local/bin:/opt/homebrew/bin"
-        IMAGE_NAME = "pasindu12345/springboot-food-ordering-application:v0.0.1$BUILD_NUMBER"
+        IMAGE_REPO = "pasindu12345/food-ordering-application-server"
+        IMAGE_NAME = "${IMAGE_REPO}:latest"
+        IMAGE_VERSION_TAG = "${IMAGE_REPO}:v0.0.${BUILD_NUMBER}"
     }
 
     stages {
-        stage('checkout') {
-            agent any
+        stage('Quick Clean & Prep') {
             steps {
-                 script{
-                        dir("terraform")
-                        {
-                            git "https://github.com/Pasinduimalsha/Food-Ordering-Application.git"
-                        }
-                    }
-                }
-        }
-        stage('Plan') {
-            agent any
-            steps {
-                withEnv(["PATH+LOCAL=/usr/local/bin:/opt/homebrew/bin"]){
-                    sh 'pwd;cd terraform/ ; terraform init'
-                    sh "pwd;cd terraform/ ; terraform plan -out tfplan"
-                    sh 'pwd;cd terraform/ ; terraform show -no-color tfplan > tfplan.txt'
+                script {
+                    echo "--- Disk usage before cleanup ---"
+                    sh 'df -h'
+                    // Clear Docker resources on the Jenkins machine
+                    sh 'docker system prune -af || true'
+                    echo "--- Disk usage after cleanup ---"
+                    sh 'df -h'
                 }
             }
         }
+
+        stage('Terraform Plan') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform init'
+                    sh "terraform plan -out tfplan"
+                    sh 'terraform show -no-color tfplan > tfplan.txt'
+                }
+            }
+        }
+
         stage('Approval') {
-            agent any
             when {
-                not {
-                    equals expected: true, actual: params.autoApprove
-                }
+                not { equals expected: true, actual: params.autoApprove }
             }
-           steps {
-               script {
-                    withEnv(["PATH+LOCAL=/usr/local/bin:/opt/homebrew/bin"]){
+            steps {
+                script {
                     def plan = readFile 'terraform/tfplan.txt'
                     input message: "Do you want to apply the plan?",
                     parameters: [text(name: 'Plan', description: 'Please review the plan', defaultValue: plan)]
-                    }
-               }
-           }
-        }
-        stage('Apply') {
-            agent any
-            steps {
-                withEnv(["PATH+LOCAL=/usr/local/bin:/opt/homebrew/bin"]){
-                    sh "pwd;cd terraform/ ; terraform apply -input=false tfplan"
-                    sh "pwd;cd terraform/ ; terraform output -raw build_server_ip"
                 }
             }
         }
+
+        stage('Terraform Apply') {
+            steps {
+                dir('terraform') {
+                    sh "terraform apply -input=false tfplan"
+                }
+            }
+        }
+
         stage('Get Server IPs') {
-            agent any
             steps {
                 script {
-                    withEnv(["PATH+LOCAL=${LOCAL_BIN_PATH}"]) {
-                        def buildServerIp = sh(
-                            script: 'cd terraform/ ; terraform output -raw build_server_ip',
-                            returnStdout: true
-                        ).trim()
-                        echo "Build Server IP: ${buildServerIp}"
-                        def buildServerConn = "ubuntu@${buildServerIp}"
-                        echo "Build Server SSH Connection String: ${buildServerConn}"
+                    dir('terraform') {
+                        def buildIp = sh(script: 'terraform output -raw build_server_ip', returnStdout: true).trim()
+                        def deployIp = sh(script: 'terraform output -raw deploy_server_ip', returnStdout: true).trim()
+                        
+                        echo "Build Server IP: ${buildIp}"
+                        echo "Deploy Server IP: ${deployIp}"
 
-                        writeFile file: 'build_server_conn.txt', text: buildServerConn
-                        stash name: 'build_conn_data', includes: 'build_server_conn.txt'
+                        env.BUILD_SERVER = "ubuntu@${buildIp}"
+                        env.DEPLOY_SERVER = "ubuntu@${deployIp}"
+                        
+                        writeFile file: '../build_server_conn.txt', text: "ubuntu@${buildIp}"
+                        writeFile file: '../deploy_server_conn.txt', text: "ubuntu@${deployIp}"
+                    }
+                    stash name: 'conn_data', includes: '*server_conn.txt'
+                }
+            }
+        }
 
-                        def deployServerIp = sh(
-                            script: 'cd terraform/ ; terraform output -raw deploy_server_ip',
-                            returnStdout: true
-                        ).trim()
-                        echo "Deploy Server IP: ${deployServerIp}"
-                        def deployServerConn = "ubuntu@${deployServerIp}"
-                        writeFile file: 'deploy_server_conn.txt', text: deployServerConn
-                        stash name: 'deploy_conn_data', includes: 'deploy_server_conn.txt'
+        stage('Run Sonarqube') {
+            when {
+                expression { params.runSonar == true }
+            }
+            steps {
+                script {
+                    withSonarQubeEnv(installationName: 'SonarScanner') {
+                        sh './mvnw sonar:sonar -Dsonar.projectKey=food-ordering-app'
                     }
                 }
             }
         }
-        stage("Build the docker image and push to dockerhub"){
-            agent any
+
+        stage('Remote Build & Push') {
             steps {
                 script {
-                     unstash 'build_conn_data'
-                     def BUILD_SERVER = readFile('build_server_conn.txt').trim()
-
-                    sshagent(['Jenkins-slave']){
-                        withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]){
-                            echo "Connecting to Build Server: ${BUILD_SERVER}"
-                            echo "Packing the code and create a docker image"
-                            sh "scp -o StrictHostKeyChecking=no -r ${WORKSPACE}/* ${BUILD_SERVER}:/home/ubuntu/"
-                            sh "ssh -o StrictHostKeyChecking=no ${BUILD_SERVER} 'bash ~/docker-script.sh'"
-                            sh "ssh -o StrictHostKeyChecking=no ${BUILD_SERVER} 'chmod +x mvn-script.sh'"
-                            sh "ssh -o StrictHostKeyChecking=no ${BUILD_SERVER} 'bash ~/mvn-script.sh'"
-
-                            echo "Compiling code and creating JAR file on the BUILD_SERVER"
-                            sh "ssh -o StrictHostKeyChecking=no ${BUILD_SERVER} 'mvn clean package -DskipTests'"
-
-                            sh "ssh ${BUILD_SERVER} sudo docker build -t ${IMAGE_NAME} /home/ubuntu/"
-                            sh "ssh ${BUILD_SERVER} sudo docker login -u $USERNAME -p $PASSWORD"
-                            sh "ssh ${BUILD_SERVER} sudo docker push ${IMAGE_NAME}"
+                    unstash 'conn_data'
+                    def buildServer = readFile('build_server_conn.txt').trim()
+                    
+                    sshagent(['Jenkins-slave']) {
+                        withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
+                            echo "Transferring code to Build Server: ${buildServer}"
+                            // Sync code to build server
+                            sh "rsync -avz --exclude '.git' --exclude 'terraform' ./ ${buildServer}:/home/ubuntu/app/"
+                            
+                            echo "Building Docker image on remote Build Server..."
+                            sh """
+                                ssh -o StrictHostKeyChecking=no ${buildServer} '
+                                    cd app && \
+                                    chmod +x docker-script.sh && \
+                                    ./docker-script.sh && \
+                                    sudo docker build -t ${IMAGE_NAME} -t ${IMAGE_VERSION_TAG} . && \
+                                    sudo docker login -u $USERNAME -p $PASSWORD && \
+                                    sudo docker push ${IMAGE_NAME} && \
+                                    sudo docker push ${IMAGE_VERSION_TAG} && \
+                                    sudo docker system prune -af
+                                '
+                            """
                         }
                     }
                 }
             }
         }
-        stage("Run the docker image using docker-compose"){
-            agent any
-            steps{
-                script{
-                     unstash 'deploy_conn_data'
-                     def DEPLOY_SERVER = readFile('deploy_server_conn.txt').trim()
 
-                    sshagent(['Jenkins-slave']){
-                        withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]){
-                             echo "Pull the docker image"
-                             sh "scp -o StrictHostKeyChecking=no -r ${WORKSPACE}/* ${DEPLOY_SERVER}:/home/ubuntu/"
-                             sh "ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} 'bash ~/docker-script.sh'"
-                             sh "ssh ${DEPLOY_SERVER} sudo docker login -u $USERNAME -p $PASSWORD"
-                             sh "ssh -o StrictHostKeyChecking=no ${DEPLOY_SERVER} 'bash ~/docker-compose-script.sh ${IMAGE_NAME}'"
+        stage('Remote Deploy') {
+            steps {
+                script {
+                    unstash 'conn_data'
+                    def deployServer = readFile('deploy_server_conn.txt').trim()
+
+                    sshagent(['Jenkins-slave']) {
+                        withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
+                            echo "Deploying to Deploy Server: ${deployServer}"
+                            
+                            // Only need docker-compose and the install scripts
+                            sh "scp -o StrictHostKeyChecking=no docker-compose.yml docker-script.sh docker-compose-script.sh ${deployServer}:/home/ubuntu/"
+                            
+                            sh """
+                                ssh -o StrictHostKeyChecking=no ${deployServer} '
+                                    chmod +x docker-script.sh docker-compose-script.sh && \
+                                    ./docker-script.sh && \
+                                    sudo docker login -u $USERNAME -p $PASSWORD && \
+                                    ./docker-compose-script.sh ${IMAGE_NAME}
+                                '
+                            """
                         }
                     }
                 }
             }
+        }
+    }
 
+    post {
+        always {
+            script {
+                try {
+                    echo "--- Post-build aggressive cleanup ---"
+                    sh 'rm -rf target/ || true'
+                    sh 'docker system prune -af || true'
+                    sh 'rm -rf /var/lib/jenkins/.sonar/cache/* || true'
+                    sh 'df -h'
+                    deleteDir()
+                } catch (Exception e) {
+                    echo "Cleanup failed: ${e.getMessage()}"
+                }
+            }
         }
     }
 }
