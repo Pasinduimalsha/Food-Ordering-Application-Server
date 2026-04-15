@@ -1,5 +1,15 @@
-data "aws_vpc" "default"{
-    default = true
+data "aws_vpc" "default" {
+  # If vpc_name is "default", look for the AWS default VPC. 
+  # Otherwise, search for a VPC with a matching "Name" tag.
+  default = var.vpc_name == "default" ? true : false
+
+  dynamic "filter" {
+    for_each = var.vpc_name == "default" ? [] : [1]
+    content {
+      name   = "tag:Name"
+      values = [var.vpc_name]
+    }
+  }
 }
 
 data "aws_subnets" "default" {
