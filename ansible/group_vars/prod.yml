@@ -1,0 +1,5 @@
+# Production Variables
+env_name: "production"
+db_name: "food_ordering_prod"
+app_port: 80
+log_level: "INFO"

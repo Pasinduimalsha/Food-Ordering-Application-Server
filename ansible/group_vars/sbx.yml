@@ -1,0 +1,5 @@
+# Sandbox Variables
+env_name: "sandbox"
+db_name: "food_ordering_sbx"
+app_port: 8081
+log_level: "DEBUG"

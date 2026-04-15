@@ -1,0 +1,5 @@
+# QA Variables
+env_name: "qa"
+db_name: "food_ordering_qa"
+app_port: 8082
+log_level: "DEBUG"
