@@ -24,18 +24,22 @@ pipeline {
         stage('Determine Environment') {
             steps {
                 script {
+                    // Get the branch name from several possible Jenkins variables
+                    def branch = env.BRANCH_NAME ?: env.GIT_BRANCH ?: ""
+                    echo "Checking Branch: ${branch}"
+
                     // Logic: Map Git Branch to Environment
-                    if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
+                    if (branch.contains('main') || branch.contains('master')) {
                         env.DEPLOY_ENV = 'prod'
-                    } else if (env.BRANCH_NAME == 'qa') {
+                    } else if (branch.contains('qa')) {
                         env.DEPLOY_ENV = 'qa'
-                    } else if (env.BRANCH_NAME == 'staging') {
+                    } else if (branch.contains('staging')) {
                         env.DEPLOY_ENV = 'stg'
                     } else {
-                        // For webhook triggers on other branches, or if manually triggered with a selection
+                        // Use parameter if manually triggered, otherwise default to sbx
                         env.DEPLOY_ENV = params.TARGET_ENV ?: 'sbx'
                     }
-                    echo "Target Environment determined as: ${env.DEPLOY_ENV}"
+                    echo ">>> FINAL TARGET ENVIRONMENT: ${env.DEPLOY_ENV} <<<"
                 }
             }
         }
