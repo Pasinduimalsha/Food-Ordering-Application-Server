@@ -61,3 +61,5 @@ provider "aws" {
 
 }
 
+.DS_Store
+.DS_Store?
