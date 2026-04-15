@@ -71,7 +71,7 @@ resource "aws_instance" "deploy_server" {
   ami = var.ami
   subnet_id = data.aws_subnet.default.id
   vpc_security_group_ids = [aws_security_group.deploy_server_sg.id]
-  instance_type = var.instance_type
+  instance_type = var.deploy_instance_type
   key_name = var.key_name
   tags = {
     Name = "Deploy Server"
