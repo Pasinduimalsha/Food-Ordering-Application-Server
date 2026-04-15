@@ -15,6 +15,7 @@ pipeline {
         IMAGE_REPO = "pasindu12345/food-ordering-application-server"
         IMAGE_NAME = "${IMAGE_REPO}:latest"
         IMAGE_VERSION_TAG = "${IMAGE_REPO}:v0.0.${BUILD_NUMBER}"
+        S3_BUCKET = "food-delivery-terraform-state-pasindu"
     }
 
     stages {
@@ -23,7 +24,6 @@ pipeline {
                 script {
                     echo "--- Disk usage before cleanup ---"
                     sh 'df -h'
-                    // Clear Docker resources on the Jenkins machine
                     sh 'docker system prune -af || true'
                     echo "--- Disk usage after cleanup ---"
                     sh 'df -h'
@@ -62,7 +62,7 @@ pipeline {
             }
         }
 
-        stage('Get Server IPs') {
+        stage('Get Server IPs & Store in S3') {
             steps {
                 script {
                     dir('terraform') {
@@ -72,21 +72,22 @@ pipeline {
                         echo "Build Server IP: ${buildIp}"
                         echo "Deploy Server IP: ${deployIp}"
 
-                        env.BUILD_SERVER = "ubuntu@${buildIp}"
-                        env.DEPLOY_SERVER = "ubuntu@${deployIp}"
+                        def buildServerConn = "ubuntu@${buildIp}"
+                        def deployServerConn = "ubuntu@${deployIp}"
                         
-                        writeFile file: '../build_server_conn.txt', text: "ubuntu@${buildIp}"
-                        writeFile file: '../deploy_server_conn.txt', text: "ubuntu@${deployIp}"
+                        writeFile file: 'build_server_conn.txt', text: buildServerConn
+                        writeFile file: 'deploy_server_conn.txt', text: deployServerConn
+
+                        // Upload these to S3 so they persist across builds even if workspace is deleted
+                        sh "aws s3 cp build_server_conn.txt s3://${S3_BUCKET}/food-ordering-server/build_server_conn.txt"
+                        sh "aws s3 cp deploy_server_conn.txt s3://${S3_BUCKET}/food-ordering-server/deploy_server_conn.txt"
                     }
-                    stash name: 'conn_data', includes: '*server_conn.txt'
                 }
             }
         }
 
         stage('Run Sonarqube') {
-            when {
-                expression { params.runSonar == true }
-            }
+            when { expression { params.runSonar == true } }
             steps {
                 script {
                     withSonarQubeEnv(installationName: 'SonarScanner') {
@@ -99,13 +100,13 @@ pipeline {
         stage('Remote Build & Push') {
             steps {
                 script {
-                    unstash 'conn_data'
+                    // Download the connection string from S3 instead of using local files
+                    sh "aws s3 cp s3://${S3_BUCKET}/food-ordering-server/build_server_conn.txt build_server_conn.txt"
                     def buildServer = readFile('build_server_conn.txt').trim()
                     
                     sshagent(['Jenkins-slave']) {
                         withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
                             echo "Transferring code to Build Server: ${buildServer}"
-                            // Sync code to build server
                             sh "rsync -avz --exclude '.git' --exclude 'terraform' ./ ${buildServer}:/home/ubuntu/app/"
                             
                             echo "Building Docker image on remote Build Server..."
@@ -130,14 +131,13 @@ pipeline {
         stage('Remote Deploy') {
             steps {
                 script {
-                    unstash 'conn_data'
+                    // Download the connection string from S3
+                    sh "aws s3 cp s3://${S3_BUCKET}/food-ordering-server/deploy_server_conn.txt deploy_server_conn.txt"
                     def deployServer = readFile('deploy_server_conn.txt').trim()
 
                     sshagent(['Jenkins-slave']) {
                         withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
                             echo "Deploying to Deploy Server: ${deployServer}"
-                            
-                            // Only need docker-compose and the install scripts
                             sh "scp -o StrictHostKeyChecking=no docker-compose.yml docker-script.sh docker-compose-script.sh ${deployServer}:/home/ubuntu/"
                             
                             sh """
