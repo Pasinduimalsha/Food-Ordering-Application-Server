@@ -3,7 +3,7 @@ services:
   app:
     build: .
     container_name: food-ordering-application
-    image: springboot-food-ordering-application:v0.0.1
+    image: ${DOCKER_IMAGE:-food-ordering-application-server:v0.0.1}
     restart: always
     ports:
       - "8081:8080"
