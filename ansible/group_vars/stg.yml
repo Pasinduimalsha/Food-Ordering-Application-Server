@@ -1,0 +1,5 @@
+# Staging Variables
+env_name: "staging"
+db_name: "food_ordering_stg"
+app_port: 8083
+log_level: "INFO"

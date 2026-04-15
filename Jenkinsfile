@@ -8,6 +8,7 @@ pipeline {
     parameters {
         booleanParam(name: 'autoApprove', defaultValue: false, description: 'Automatically run apply after generating plan?')
         booleanParam(name: 'runSonar', defaultValue: false, description: 'Run SonarQube code analysis?')
+        choice(name: 'TARGET_ENV', choices: ['sbx', 'qa', 'stg', 'prod'], description: 'Select the target environment for deployment')
     }
     environment {
         AWS_ACCESS_KEY_ID = credentials('AWS_ACCESS_KEY_ID')
@@ -20,6 +21,25 @@ pipeline {
     }
 
     stages {
+        stage('Determine Environment') {
+            steps {
+                script {
+                    // Logic: Map Git Branch to Environment
+                    if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
+                        env.DEPLOY_ENV = 'prod'
+                    } else if (env.BRANCH_NAME == 'qa') {
+                        env.DEPLOY_ENV = 'qa'
+                    } else if (env.BRANCH_NAME == 'staging') {
+                        env.DEPLOY_ENV = 'stg'
+                    } else {
+                        // For webhook triggers on other branches, or if manually triggered with a selection
+                        env.DEPLOY_ENV = params.TARGET_ENV ?: 'sbx'
+                    }
+                    echo "Target Environment determined as: ${env.DEPLOY_ENV}"
+                }
+            }
+        }
+
         stage('Quick Clean & Prep') {
             steps {
                 script {
@@ -67,7 +87,7 @@ pipeline {
             }
         }
 
-        stage('Get Server IPs & Store in S3') {
+        stage('Get Server IPs & Ansible Config') {
             steps {
                 script {
                     dir('terraform') {
@@ -77,12 +97,24 @@ pipeline {
                         echo "Build Server IP: ${buildIp}"
                         echo "Deploy Server IP: ${deployIp}"
 
+                        // Store connection strings in S3 for later stages
                         writeFile file: 'build_server_conn.txt', text: "ubuntu@${buildIp}"
                         writeFile file: 'deploy_server_conn.txt', text: "ubuntu@${deployIp}"
-
-                        // Using full path for AWS binary to avoid "command not found" errors
                         sh "${AWS_BIN} s3 cp build_server_conn.txt s3://${S3_BUCKET}/food-ordering-server/build_server_conn.txt"
                         sh "${AWS_BIN} s3 cp deploy_server_conn.txt s3://${S3_BUCKET}/food-ordering-server/deploy_server_conn.txt"
+
+                        // Dynamically create Ansible Inventory for the determined environment
+                        def inventoryContent = """
+[${env.DEPLOY_ENV}]
+${deployIp} ansible_user=ubuntu
+"""
+                        writeFile file: '../ansible/inventory.ini', text: inventoryContent
+                    }
+                    
+                    // Run Ansible Management Playbook limited to the determined environment
+                    echo "Configuring Environment: ${env.DEPLOY_ENV}"
+                    sshagent(['Jenkins-slave']) {
+                        sh "ansible-playbook -i ansible/inventory.ini ansible/server-management.yml --limit ${env.DEPLOY_ENV} --ssh-extra-args='-o StrictHostKeyChecking=no'"
                     }
                 }
             }

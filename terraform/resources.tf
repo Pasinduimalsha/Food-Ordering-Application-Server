@@ -39,12 +39,15 @@ resource "aws_security_group" "deploy_server_sg" {
   description = "Deployment Server Security Group"
   vpc_id      = data.aws_vpc.default.id
 
-  # Application Port
-  ingress {
-    from_port   = 8081
-    to_port     = 8081
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Application Ports (SBX, QA, STG, PROD)
+  dynamic "ingress" {
+    for_each = [80, 8081, 8082, 8083]
+    content {
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
   # SSH for Jenkins access

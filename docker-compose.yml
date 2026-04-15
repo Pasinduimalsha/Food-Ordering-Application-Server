@@ -6,7 +6,7 @@ services:
     image: ${DOCKER_IMAGE:-food-ordering-application-server:v0.0.1}
     restart: always
     ports:
-      - "8081:8080"
+      - "${APP_PORT:-8081}:8080"
     networks:
       - food-ordering-application_common-net
     environment:
