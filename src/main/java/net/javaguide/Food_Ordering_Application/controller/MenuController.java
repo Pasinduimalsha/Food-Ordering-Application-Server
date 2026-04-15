@@ -23,8 +23,8 @@ public class MenuController {
     @PostMapping("/{restaurantId}/menus")
     public ResponseEntity<MenuDto> createMenu(@PathVariable("restaurantId") Long restaurantId, @RequestBody MenuDto menuDto){
 
-        System.out.println("restaurantId :"+restaurantId );
-        System.out.println("Menu :"+ menuDto);
+        System.out.println("restaurantId:"+restaurantId );
+        System.out.println("Menu:"+ menuDto);
         MenuDto savedMenuDto =  menuService.createMenu(restaurantId,menuDto);
         return new ResponseEntity<>(savedMenuDto, HttpStatus.CREATED);
 
