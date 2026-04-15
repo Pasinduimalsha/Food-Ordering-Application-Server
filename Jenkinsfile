@@ -109,7 +109,7 @@ pipeline {
                     sshagent(['Jenkins-slave']) {
                         withCredentials([usernamePassword(credentialsId: '12345678', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
                             echo "Transferring code to Build Server: ${buildServer}"
-                            sh "rsync -avz --exclude '.git' --exclude 'terraform' ./ ${buildServer}:/home/ubuntu/app/"
+                            sh "rsync -avz -e 'ssh -o StrictHostKeyChecking=no' --exclude '.git' --exclude 'terraform' ./ ${buildServer}:/home/ubuntu/app/"
                             
                             echo "Building Docker image on remote Build Server..."
                             sh """
