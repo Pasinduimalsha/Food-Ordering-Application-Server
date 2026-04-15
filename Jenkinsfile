@@ -16,7 +16,7 @@ pipeline {
         IMAGE_NAME = "${IMAGE_REPO}:latest"
         IMAGE_VERSION_TAG = "${IMAGE_REPO}:v0.0.${BUILD_NUMBER}"
         S3_BUCKET = "food-delivery-terraform-state-pasindu"
-        AWS_BIN = "/usr/local/bin/aws"
+        AWS_BIN = "${HOME}/.local/bin/aws"
     }
 
     stages {
