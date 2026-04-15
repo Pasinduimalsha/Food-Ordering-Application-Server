@@ -11,6 +11,8 @@ services:
       - food-ordering-application_common-net
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysqldb:3306/food_ordering_application?allowPublicKeyRetrieval=true&autoReconnect=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: pasindu123
     depends_on:
       - mysqldb
 
@@ -26,6 +28,7 @@ services:
         MYSQL_DATABASE: food_ordering_application
         MYSQL_USER: pasindu
         MYSQL_PASSWORD: pasindu123
+        MYSQL_ROOT_HOST: '%'
     ports:
       - "3307:3306"
     volumes:
