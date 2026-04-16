@@ -183,7 +183,7 @@ ${deployIp} ansible_user=ubuntu
                                     chmod +x docker-script.sh docker-compose-script.sh && \
                                     ./docker-script.sh && \
                                     sudo docker login -u $USERNAME -p $PASSWORD && \
-                                    ./docker-compose-script.sh ${IMAGE_NAME}
+                                    ./docker-compose-script.sh ${IMAGE_VERSION_TAG}
                                 '
                             """
                         }

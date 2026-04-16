@@ -22,6 +22,7 @@ echo "Performing clean redeploy with image: $1"
 export DOCKER_IMAGE=$1
 
 # We use sudo here just in case the group change hasn't kicked in yet for the current process
+sudo -E docker-compose -f /home/ubuntu/docker-compose.yml pull app
 sudo -E docker-compose -f /home/ubuntu/docker-compose.yml down -v
 sudo -E docker-compose -f /home/ubuntu/docker-compose.yml up -d
 
